@@ -30,7 +30,7 @@ class CommandEvent(BaseModel):
 class Orchestrator:
     def __init__(self, vector_db_path, session_output_path):
         # Inizializziamo il Logger passandogli il path del DB Vettoriale
-        self.predictive = PredictiveAgent(rag_dir=vector_db_path)
+        self.predictive = PredictiveAgent(rag_dir=vector_db_path, session_output_path=session_output_path)
         # Inizializziamo il Falsario
         self.forger = ForgerAgent()
         # Salviamo il path di output per le sessioni

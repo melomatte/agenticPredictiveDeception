@@ -19,9 +19,17 @@ services:
     build:
       context: ./agentContainer
     volumes:
-      # Montiamo i dati persistenti sull'host
-      - /media/matteo/T9/Cybersecurity/chroma_storage_ctx5:/app/data/vector_db
-      - /media/matteo/T9/Cybersecurity/sessions:/app/data/sessions
+      - type: bind
+        source: /media/matteo/T9/Cybersecurity/chroma_storage_ctx5
+        target: /app/data/vector_db
+        bind:
+          create_host_path: false
+
+      - type: bind
+        source: /media/matteo/T9/Cybersecurity/sessions
+        target: /app/data/sessions
+        bind:
+          create_host_path: false  
     networks:
       - honeypot_net
     restart: unless-stopped
