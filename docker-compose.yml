@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  honeypot:
+    build: 
+      context: ./honeypot
+    ports:
+      - "2222:2222"
+    networks:
+      - honeypot_net
+    restart: unless-stopped
+    # Opzionale: limita le risorse per evitare che l'attaccante esaurisca la CPU dell'host
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+networks:
+  honeypot_net:
+    driver: bridge
