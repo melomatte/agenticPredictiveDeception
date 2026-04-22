@@ -1,5 +1,6 @@
 import os
-from openai import AsyncOpenAI
+from google.genai.types import HarmCategory, HarmBlockThreshold
+from google.genai import Client
 
 KEY_FILE = "api_key.txt"
 
@@ -22,7 +23,7 @@ class AgentConnector:
             self.model = "local-model"
 
         # Usiamo AsyncOpenAI per non bloccare i thread di FastAPI
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = Client(api_key=api_key)
 
     def _load_key_logic(self, filename):
         
@@ -50,18 +51,28 @@ class AgentConnector:
 
     async def think(self, full_prompt):
         try:
-            response = await self.client.chat.completions.create(
+            #Visto che stiamo simulando degli attacchi, è necessario disattivare i blocchi di sicurezza
+            safety_config = [
+                {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
+                {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+                {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+                {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            ]
+
+            response = self.client.models.generate_content(
                 model=self.model,
-                messages=[{"role": "user", "content": full_prompt}],
-                temperature=0.3, # Bassa per il logger, potremmo alzarla per il falsario
+                contents=full_prompt,
+                config={
+                    "temperature": 0.0,
+                    "top_p": 0.1,
+                    "max_output_tokens": 1024,
+                    "safety_settings": safety_config # APPLICHIAMO I FILTRI PERMISSIVI
+                }
             )
-            
-            # Estrapolazione risposta e verifica che non sia nulla
-            testo_risposta = response.choices[0].message.content
-            if not testo_risposta:
-                return ""
-            else:
-                return testo_risposta
+
+            # Controllo difensivo: se il modello restituisce None o non ha testo
+            if not response or not response.text: return ""
+            else: return response.text
             
         except Exception as e:
             print(f"❌ Eccezione API: {e}")
