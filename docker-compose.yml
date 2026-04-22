@@ -6,6 +6,10 @@ services:
       context: ./honeypot
     ports:
       - "2222:2222"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - ORCHESTRATOR_URL=http://host.docker.internal:8000/new_command
     networks:
       - honeypot_net
     restart: unless-stopped
