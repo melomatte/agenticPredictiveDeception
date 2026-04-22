@@ -34,7 +34,7 @@ else:
 LOG_FILE = "/tmp/fakeshell_local.json"
 
 session_start_time = time.strftime("%Y%m%d_%H%M%S")
-SESSION_ID = f"{session_start_time}_{attacker_ip.replace(".","-")}"
+SESSION_ID = f"{session_start_time}_{attacker_ip.replace('.','-')}"
 
 def trigger_ai(cmd, cwd):
     """

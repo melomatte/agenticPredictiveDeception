@@ -1,7 +1,7 @@
 import os
 import httpx
 from agent_connector import AgentConnector
-from forger_policies import FALSARIO_SYSTEM, FALSARIO_RULES, ORCHESTRATOR_CONTEXT
+from agent_forger.forger_policies import FALSARIO_SYSTEM, FALSARIO_RULES, ORCHESTRATOR_CONTEXT
 
 class ForgerAgent:
     def __init__(self, model_name="gemini-flash-latest", provider="cloud"):

@@ -2,8 +2,8 @@ from collections import deque
 import json
 import os
 from agent_connector import AgentConnector
-from agentContainer.agentArchitecture.agent_predictive.predictive_policies import PREDICTIVE_STATIC, RAG_EXAMPLE
-from rag_support import VectorContextRetriever
+from agent_predictive.predictive_policies import PREDICTIVE_STATIC, RAG_EXAMPLE
+from agent_predictive.rag_support import VectorContextRetriever
 
 class PredictiveAgent:
     def __init__(self, rag_dir, session_output_path, context_history=5, k=5, model_name="gemini-flash-latest", provider="cloud"):
