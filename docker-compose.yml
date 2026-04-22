@@ -6,19 +6,25 @@ services:
       context: ./honeypot
     ports:
       - "2222:2222"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
-      - ORCHESTRATOR_URL=http://host.docker.internal:8000/new_command
+      # Punta all'Orchestratore
+      - ORCHESTRATOR_URL=http://ai-orchestrator:8000/new_command
     networks:
       - honeypot_net
     restart: unless-stopped
-    # Opzionale: limita le risorse per evitare che l'attaccante esaurisca la CPU dell'host
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'
-          memory: 512M
+    depends_on:
+      - ai-orchestrator
+
+  ai-orchestrator:
+    build:
+      context: ./agentContainer
+    volumes:
+      # Montiamo i dati persistenti sull'host
+      - /media/matteo/T9/Cybersecurity/chroma_storage_ctx5:/app/data/vector_db
+      - /media/matteo/T9/Cybersecurity/sessions:/app/data/sessions
+    networks:
+      - honeypot_net
+    restart: unless-stopped
 
 networks:
   honeypot_net:

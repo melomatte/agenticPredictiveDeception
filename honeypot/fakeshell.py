@@ -33,6 +33,9 @@ else:
 # Logging Locale (Opzionale/Backup)
 LOG_FILE = "/tmp/fakeshell_local.json"
 
+session_start_time = time.strftime("%Y%m%d_%H%M%S")
+SESSION_ID = f"{session_start_time}_{attacker_ip.replace(".","-")}"
+
 def trigger_ai(cmd, cwd):
     """
     Invia l'evento all'Orchestratore AI e attende una risposta.
@@ -40,6 +43,7 @@ def trigger_ai(cmd, cwd):
     permettendo alla shell di continuare.
     """
     entry = {
+        "session_id": SESSION_ID,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "ip": attacker_ip,
         "user": user,

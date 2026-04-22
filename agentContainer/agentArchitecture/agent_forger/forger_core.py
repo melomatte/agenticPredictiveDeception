@@ -4,10 +4,10 @@ from agent_connector import AgentConnector
 from forger_policies import FALSARIO_SYSTEM, FALSARIO_RULES, ORCHESTRATOR_CONTEXT
 
 class ForgerAgent:
-    def __init__(self, model_name="gpt-4o-mini", provider="cloud"):
-        self.id = "Falsario_01"
+    def __init__(self, model_name="gemini-flash-latest", provider="cloud"):
+        self.id = "FORGER AGENT"
         self.brain = AgentConnector(provider=provider, model_name=model_name)
-        self.mcp_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8000")
+        #self.mcp_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8000")
         
         self.static_prompt = f"{FALSARIO_SYSTEM}\n\n{FALSARIO_RULES}"
 

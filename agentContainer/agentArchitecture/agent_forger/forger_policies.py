@@ -1,4 +1,3 @@
-# --- POLICY DEL FALSARIO ---
 FALSARIO_SYSTEM = """
 Sei il Falsario Agent di un sistema Honeypot. Il tuo compito è generare contenuti fittizi 
 ma altamente realistici per file di sistema, per ingannare l'attaccante.
