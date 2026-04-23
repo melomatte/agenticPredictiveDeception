@@ -18,22 +18,33 @@ services:
   ai-orchestrator:
     build:
       context: ./agentContainer
+    networks:
+      - honeypot_net
+      - backend_net
+    environment:
+      - BACKEND_MCP_URL=http://agent-backend:8000
+    depends_on:
+      - agent-backend
+    restart: unless-stopped
+
+  agent-backend:
+    build: ./agentBackend
     volumes:
       - type: bind
         source: /media/matteo/T9/Cybersecurity/chroma_storage_ctx5
         target: /app/data/vector_db
         bind:
           create_host_path: false
-
       - type: bind
         source: /media/matteo/T9/Cybersecurity/sessions
         target: /app/data/sessions
         bind:
-          create_host_path: false  
+          create_host_path: false
     networks:
-      - honeypot_net
-    restart: unless-stopped
+      - backend_net
 
 networks:
   honeypot_net:
+    driver: bridge
+  backend_net:
     driver: bridge

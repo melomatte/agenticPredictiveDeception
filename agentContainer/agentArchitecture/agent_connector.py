@@ -1,5 +1,5 @@
 import os
-from google.genai.types import HarmCategory, HarmBlockThreshold
+from google.genai.types import HarmCategory, HarmBlockThreshold, GenerateContentConfig
 from google.genai import Client
 
 KEY_FILE = "api_key.txt"
@@ -78,3 +78,26 @@ class AgentConnector:
             print(f"❌ Eccezione API: {e}")
             class Fallback: content = '{"action": "error", "reasoning": "Eccezione API"}'
             return Fallback()
+    
+    async def create_agentic_chat(self, system_instruction: str, tools: list):
+        """Crea una sessione interattiva con l'LLM, equipaggiata con Tool"""
+        
+        safety_config = [
+            {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+        ]
+
+        config = GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=tools,
+            temperature=0.0, # Bassissima per seguire le istruzioni rigidamente
+            safety_settings=safety_config
+        )
+
+        # Restituiamo la sessione di chat aperta
+        return await self.client.aio.chats.create(
+            model=self.model,
+            config=config
+        )

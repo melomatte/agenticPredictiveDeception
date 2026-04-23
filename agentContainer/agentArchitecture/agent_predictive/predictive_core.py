@@ -1,67 +1,120 @@
-from collections import deque
-import json
-import os
+import httpx
 from agent_connector import AgentConnector
-from agent_predictive.predictive_policies import PREDICTIVE_STATIC, RAG_EXAMPLE
-from agent_predictive.rag_support import VectorContextRetriever
+from agent_predictive.predictive_policies import PROMPT_MCP
+from google.genai import types
+from fastmcp import Client
 
 class PredictiveAgent:
-    def __init__(self, rag_dir, session_output_path, context_history=5, k=5, model_name="gemini-flash-latest", provider="cloud"):
+    def __init__(self, mcp_url="http://agent-backend:8000", context_history=5, k=5, model_name="gemini-flash-latest", provider="cloud"):
         self.id = "AGENT PREDICTIVE"
         self.connector = AgentConnector(provider=provider, model_name=model_name)
-        self.rag = VectorContextRetriever(rag_dir)
         self.k=k
         self.context_history=context_history
-        self.session_output_path=session_output_path
-        #self.mcp_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8000")
+        self.mcp_url = mcp_url
+        self.prompt = PROMPT_MCP.format(k=self.k, N=self.context_history)
+        self.tools = self._define_tools()
 
-    async def decide(self, eventCommand, global_directive=None):
+    def _define_tools(self):
+        log_tool = types.FunctionDeclaration(
+            name="log_session_event",
+            description="Saves the new attacker command to the session log.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "session_id": types.Schema(type=types.Type.STRING, description="Session ID"),
+                    "event_dict": types.Schema(type=types.Type.OBJECT, description="The full event dictionary")
+                },
+                required=["session_id", "event_dict"]
+            )
+        )
         
-        session_file = os.path.join(self.session_output_path, f"session_{eventCommand.session_id}.jsonl")
+        history_tool = types.FunctionDeclaration(
+            name="get_session_history",
+            description="Get the last N commands of the current session.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "session_id": types.Schema(type=types.Type.STRING, description="Session ID"),
+                    "window_size": types.Schema(type=types.Type.INTEGER, description="Number of N commands to get")
+                },
+                required=["session_id", "window_size"]
+            )
+        )
+        
+        rag_tool = types.FunctionDeclaration(
+            name="retrieve",
+            description="Queries the vector database to find similar past attacks based on current context.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "current_context_list": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING)),
+                    "k": types.Schema(type=types.Type.INTEGER)
+                },
+                required=["current_context_list", "k"]
+            )
+        )
+        return [log_tool, history_tool, rag_tool]
 
-        # 1. CREAZIONE CONTEXT HISTORY -> Lettura dei context_history-1 comandi per la creazione del context di attacco
-        context_history = []
+    async def decide(self, eventCommand):
+        
+        print(f"\n🔮 [{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")
+        
+        # 1. Chiediamo al Connector di aprirci una chat configurata
+        chat = await self.connector.create_agentic_chat(
+            system_instruction=self.prompt, 
+            tools=self.tools
+        )
 
-        if os.path.exists(session_file):
-            with open(session_file, 'r', encoding='utf-8') as f:
-                last_lines = deque(f, maxlen=self.context_history - 1)
-                
-                for line in last_lines:
-                    if line.strip():
-                        parsed_line = json.loads(line)
-                        
-                        if 'cmd' in parsed_line:
-                            context_history.append(parsed_line['cmd'])
+        # 2. Scateniamo l'agente passandogli l'evento puro
+        initial_message = f"New event received. Session ID: {eventCommand.session_id}, Command: {eventCommand.cmd}, Full Data: {eventCommand.dict()}"
+        response = await chat.send_message(initial_message)
 
-        # Aggiungiamo del comando corrente alla finestra di attacco
-        context_history.append(eventCommand.cmd)
-
-        # 2. LOGGING NUOVO COMANDO -> Logging del nuovo comando ricevuto nel file .jsonl di sessione
-        current_event_dict = eventCommand.dict()
-        with open(session_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(current_event_dict) + '\n')
+        # 3. IL LOOP DELL'AGENTE (continua finché l'AI non dà il testo finale)
+        while response.function_calls:
+            tool_responses = []
             
-        print(f"📝 [{self.id}] Log salvato. Contesto LLM aggiornato a {len(context_history)} comandi puri.")
+            for function_call in response.function_calls:
+                func_name = function_call.name
+                args = function_call.args
+                
+                print(f"🤖 [{self.id}] Tool Calling attivato: chiama '{func_name}'")
+                
+                # Chiama fisicamente il server MCP Backend via HTTP
+                try:
+                    tool_result = await self._execute_mcp_call(func_name, args)
+                except Exception as e:
+                    print(f"❌ [{self.id}] Errore MCP Tool '{func_name}': {e}")
+                    tool_result = {"error": str(e)}
 
-        # 3. RAG -> retrieve all'interno del DB vettoriale
-        rag_example = self.rag.retrieve(context_history, self.k)
-        
-        # 4. COSTRUZIONE PROMPT FINALE
-        final_prompt = (
-            f"{PREDICTIVE_STATIC.format(k=self.k)}\n"
-            f"\n{RAG_EXAMPLE.format(rag=rag_example)}\n"
-            f"\nCURRENT SESSION HISTORY:\n{context_history}\n"
-            f"PREDICT NEXT {self.k} COMMANDS (Raw text only):"
-        ).strip()
-
-        # 5. CHIAMATA LLM -> chiamata LLM con il prompt costruito e restituizione dei K comandi predetti
-        raw_response = await self.connector.think(final_prompt)
-        
+                # Prepara la risposta per l'LLM
+                tool_responses.append(
+                    types.Part.from_function_response(
+                        name=func_name,
+                        response={"result": tool_result}
+                    )
+                )
+            
+            # Rimanda i risultati all'LLM e aspetta la prossima mossa
+            response = await chat.send_message(tool_responses)
+            
+        # 4. Estrazione Predizione Finale
+        raw_response = response.text
         candidates = []
+        
         if raw_response:
-            print(f"[{self.id}] Risposta della predizione ottenuta correttamente\n")
+            print(f"✅ [{self.id}] Predizione generata autonomamente:\n{raw_response}")
             candidates = [line.strip() for line in raw_response.splitlines() if line.strip()]
-        else: 
-            print(f"[{self.id}] Risposta della predizione vuota\n")
-
+        
         return candidates[:self.k]
+
+    async def _execute_mcp_call(self, tool_name: str, args: dict):
+        """Esegue la chiamata usando il vero protocollo MCP (non una semplice POST REST)"""
+        # Di default, il trasporto HTTP di FastMCP espone l'API sulla rotta /mcp
+        endpoint = f"{self.mcp_url}/mcp" 
+        
+        # Gestiamo la connessione MCP in modo nativo
+        async with Client(endpoint) as client:
+            result = await client.call_tool(tool_name, args)
+            
+            # Convertiamo il risultato in stringa per sicurezza prima di passarlo a Gemini
+            return str(result)

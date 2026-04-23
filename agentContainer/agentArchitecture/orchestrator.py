@@ -13,12 +13,6 @@ load_dotenv()
 # Inizializzazione FastAPI
 app = FastAPI()
 
-# --- INPUT DI CONFIGURAZIONE ---
-# 1. Path del DB Vettoriale per il supporto RAG (Retreival Augmented Generation)
-VECTOR_DB_PATH = os.getenv("VECTOR_DB_PATH", "/app/data/vector_db")
-# 2. Cartella di output per i file di sessione JSON
-SESSION_OUTPUT_PATH = os.getenv("SESSION_OUTPUT_PATH", "/app/data/sessions")
-
 class CommandEvent(BaseModel):
     session_id: str
     timestamp: str
@@ -28,13 +22,11 @@ class CommandEvent(BaseModel):
     cmd: str
 
 class Orchestrator:
-    def __init__(self, vector_db_path, session_output_path):
+    def __init__(self):
         # Inizializziamo il Logger passandogli il path del DB Vettoriale
-        self.predictive = PredictiveAgent(rag_dir=vector_db_path, session_output_path=session_output_path)
+        self.predictive = PredictiveAgent()
         # Inizializziamo il Falsario
-        self.forger = ForgerAgent()
-        # Salviamo il path di output per le sessioni
-        self.session_output_path = session_output_path
+        self.forger = ForgerAgent()    
 
     async def dispatch(self, event: CommandEvent):
         """Gestisce il flusso sequenziale: Predizione -> Preparazione Trappola"""
@@ -53,10 +45,7 @@ class Orchestrator:
             print("[ORCHESTRATOR] ➖ Nessuna predizione rilevante. Salto fase Falsario.")
 
 # Istanza globale dell'orchestratore configurata con gli input
-orch = Orchestrator(
-    vector_db_path=VECTOR_DB_PATH, 
-    session_output_path=SESSION_OUTPUT_PATH
-)
+orch = Orchestrator()
 
 @app.post("/new_command")
 async def handle_new_command(event: CommandEvent):
