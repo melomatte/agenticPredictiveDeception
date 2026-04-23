@@ -1,3 +1,26 @@
+"""
+AgentConnector — Interfaccia unificata verso il modello LLM (Google Gemini).
+
+Questo modulo astrae la comunicazione con il modello linguistico, esponendo due modalità di interazione distinte a 
+seconda del tipo di task richiesto.
+
+METODO think():
+Chiamata singola stateless (single-turn): invia un prompt e riceve una risposta. Adatta per task semplici che non richiedono memoria della conversazione né
+l'uso di tool esterni. Non supporta il tool calling loop.
+
+METODO create_agentic_chat():
+Crea e restituisce una sessione di chat multi-turno configurata con un system prompt e un set di tool (FunctionDeclaration Gemini).
+Questa è la modalità corretta per implementare agenti autonomi con tool calling, per due motivi fondamentali:
+    1. STATO CONVERSAZIONALE: la sessione di chat mantiene automaticamente l'intera cronologia dei messaggi 
+        (prompt → tool call → tool result → ...) lato SDK, senza che il chiamante debba ricostruirla manualmente ad ogni turno.
+    2. TOOL CALLING NATIVO: il formato dei messaggi tool_use e tool_result viene gestito correttamente dall'SDK Gemini, 
+        che si aspetta una struttura specifica per alternare risposte del modello e risultati dei tool. Gestirla manualmente
+        con generate_content() sarebbe fragile e soggetto a errori di formato.
+
+La sessione restituita viene poi pilotata dal loop agentico in PredictiveAgent, che invia i risultati dei tool con 
+chat.send_message() fino a quando il modello non produce la risposta testuale finale.
+"""
+
 import os
 from google.genai.types import HarmCategory, HarmBlockThreshold, GenerateContentConfig
 from google.genai import Client
@@ -22,7 +45,6 @@ class AgentConnector:
             api_key = "lm-studio"
             self.model = "local-model"
 
-        # Usiamo AsyncOpenAI per non bloccare i thread di FastAPI
         self.client = Client(api_key=api_key)
 
     def _load_key_logic(self, filename):
@@ -48,7 +70,7 @@ class AgentConnector:
             return env_key
             
         return "no-key-found"
-
+    
     async def think(self, full_prompt):
         try:
             #Visto che stiamo simulando degli attacchi, è necessario disattivare i blocchi di sicurezza
@@ -73,15 +95,15 @@ class AgentConnector:
             # Controllo difensivo: se il modello restituisce None o non ha testo
             if not response or not response.text: return ""
             else: return response.text
-            
+
         except Exception as e:
             print(f"❌ Eccezione API: {e}")
             class Fallback: content = '{"action": "error", "reasoning": "Eccezione API"}'
             return Fallback()
-    
+
     def create_agentic_chat(self, system_instruction: str, tools: list):
-        """Crea una sessione interattiva con l'LLM, equipaggiata con Tool"""
         
+        # Disattiviamo i filtri di sicurezza e configuriamo la chat LLM
         safety_config = [
             {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
             {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
@@ -96,8 +118,5 @@ class AgentConnector:
             safety_settings=safety_config
         )
 
-        # Restituiamo la sessione di chat aperta
-        return self.client.aio.chats.create(
-            model=self.model,
-            config=config
-        )
+        # Restituzione chat LLM (supporto nativo all'utilizzo dei tool)
+        return self.client.aio.chats.create(model=self.model,config=config)

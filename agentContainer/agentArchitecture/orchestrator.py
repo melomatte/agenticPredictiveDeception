@@ -1,16 +1,38 @@
-import os
+"""
+Orchestrator — Punto di ingresso e coordinamento del sistema agentico legato all'honeypot.
+
+Questo modulo espone un server FastAPI che riceve gli eventi dalla fakeshell (ogni comando digitato da un attaccante) e coordina 
+il flusso di lavoro tra i vari agenti AI del sistema.
+
+La gestione del ciclo di vita avviene con asynccontextmanager. Il problema centrale è che gli agenti AI mantengono connessioni 
+di rete persistenti (SSE verso il server MCP backend) che devono essere aperte prima che il server inizi a ricevere richieste e 
+chiuse in modo ordinato allo shutdown. Per garantire questo, si utilizza il meccanismo 'lifespan' di FastAPI, decorato
+con asynccontextmanager. Tutto il codice prima dello 'yield' viene eseguito all'avvio dell'app, mentre tutto quello dopo 
+viene eseguito allo spegnimento.
+
+Per come è stato scritto il codice di lifespan, l'Orchestrator è esso stesso un async context manager con i due metodi:
+__aenter__ -> all'entrata apre le connessioni SSE di tutti gli agenti che ne hanno bisogno (chiamando a sua volta i loro metodi __aenter__)
+__aexit__ -> all'uscita le chiude in modo garantito anche in caso di eccezione (chiamando a sua volta i loro metodi __aexit__)
+
+L'istanza dell'orchestratore (con le connessioni già aperte) viene salvata in app.state.orch, rendendola accessibile a tutti 
+gli endpoint senza usare variabili globali.
+
+FLUSSO DI DISPATCH:
+    1. Fase Predizione: PredictiveAgent analizza il comando e predice i successivi.
+    2. Fase Falsario:   ForgerAgent prepara risposte ingannevoli basate sulla predizione.
+"""
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
-# Import degli agenti (Core-Connector-Policies)
 from agent_predictive import PredictiveAgent
 from agent_forger import ForgerAgent
 
 # Carichiamo le variabili dal file .env (o dall'ambiente Docker)
 load_dotenv()
 
+# Struttura evento ricevuta da fakeshell
 class CommandEvent(BaseModel):
     session_id: str
     timestamp: str
@@ -21,12 +43,10 @@ class CommandEvent(BaseModel):
 
 class Orchestrator:
     def __init__(self):
-        # Gli agenti vengono costruiti ma la connessione SSE non è ancora aperta
         self.predictive = PredictiveAgent()
         self.forger = ForgerAgent()
 
     async def __aenter__(self):
-        """Apre le connessioni SSE di tutti gli agenti che le richiedono."""
         print("[ORCHESTRATOR] 🔌 Apertura connessioni agenti...")
         await self.predictive.__aenter__()
         # Se anche ForgerAgent diventerà un async context manager, aggiungilo qui:
@@ -35,14 +55,12 @@ class Orchestrator:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Chiude le connessioni SSE di tutti gli agenti."""
         print("[ORCHESTRATOR] 🔌 Chiusura connessioni agenti...")
         await self.predictive.__aexit__(exc_type, exc_val, exc_tb)
         # await self.forger.__aexit__(exc_type, exc_val, exc_tb)
         print("[ORCHESTRATOR] ✅ Connessioni agenti chiuse.")
 
     async def dispatch(self, event: CommandEvent):
-        """Gestisce il flusso sequenziale: Predizione -> Preparazione Trappola"""
         print(f"\n[ORCHESTRATOR] 📥 Nuovo comando intercettato: '{event.cmd}'")
 
         # --- FASE 1: PREDIZIONE + RAG ---
@@ -56,23 +74,19 @@ class Orchestrator:
             await self.forger.decide(event)
         else:
             print("[ORCHESTRATOR] ➖ Nessuna predizione rilevante. Salto fase Falsario.")
+        print(f"[ORCHESTRATOR] 🔮 Fase 2 terminata")
 
 
 # --- Lifespan: gestisce startup e shutdown dell'intera applicazione ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Tutto ciò che sta prima del 'yield' viene eseguito all'avvio del server.
-    Tutto ciò che sta dopo viene eseguito allo shutdown.
-    L'orchestratore (e le connessioni SSE degli agenti) vivono esattamente
-    quanto il server FastAPI.
-    """
+
+    # Uscendo dal 'async with', __aexit__ chiude automaticamente tutte le connessioni
     async with Orchestrator() as orch:
         print("[ORCHESTRATOR] 🚀 Server pronto a ricevere eventi.")
-        app.state.orch = orch   # rendiamo l'orchestratore accessibile agli endpoint
-        yield                   # il server è attivo e serve le richieste
-    # Uscendo dal 'async with', __aexit__ chiude automaticamente tutte le connessioni
+        app.state.orch = orch   
+        yield                   
 
 
 # Inizializzazione FastAPI con lifespan
