@@ -4,7 +4,7 @@ from agent_connector import AgentConnector
 from agent_forger.forger_policies import FALSARIO_SYSTEM, FALSARIO_RULES, ORCHESTRATOR_CONTEXT
 
 class ForgerAgent:
-    def __init__(self, model_name="gemini-flash-latest", provider="cloud"):
+    def __init__(self, model_name="gemini-1.5-flash", provider="cloud"):
         self.id = "FORGER AGENT"
         self.brain = AgentConnector(provider=provider, model_name=model_name)
         #self.mcp_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8000")

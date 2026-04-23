@@ -28,7 +28,7 @@ from google.genai import Client
 KEY_FILE = "api_key.txt"
 
 class AgentConnector:
-    def __init__(self, model_name="gemini-flash-latest", provider="cloud"):
+    def __init__(self, model_name="gemini-1.5-flash", provider="cloud"):
         self.provider = provider
         
         if self.provider == "cloud":
