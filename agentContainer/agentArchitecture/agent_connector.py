@@ -79,7 +79,7 @@ class AgentConnector:
             class Fallback: content = '{"action": "error", "reasoning": "Eccezione API"}'
             return Fallback()
     
-    async def create_agentic_chat(self, system_instruction: str, tools: list):
+    def create_agentic_chat(self, system_instruction: str, tools: list):
         """Crea una sessione interattiva con l'LLM, equipaggiata con Tool"""
         
         safety_config = [
@@ -97,7 +97,7 @@ class AgentConnector:
         )
 
         # Restituiamo la sessione di chat aperta
-        return await self.client.aio.chats.create(
+        return self.client.aio.chats.create(
             model=self.model,
             config=config
         )

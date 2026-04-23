@@ -22,9 +22,9 @@ class PredictiveAgent:
                 type=types.Type.OBJECT,
                 properties={
                     "session_id": types.Schema(type=types.Type.STRING, description="Session ID"),
-                    "event_dict": types.Schema(type=types.Type.OBJECT, description="The full event dictionary")
+                    "event_data": types.Schema(type=types.Type.OBJECT, description="The full event dictionary")
                 },
-                required=["session_id", "event_dict"]
+                required=["session_id", "event_data"]
             )
         )
         
@@ -53,14 +53,19 @@ class PredictiveAgent:
                 required=["current_context_list", "k"]
             )
         )
-        return [log_tool, history_tool, rag_tool]
 
+        mcp_tools = types.Tool(
+            function_declarations=[log_tool, history_tool, rag_tool]
+        )
+        
+        return [mcp_tools]
+    
     async def decide(self, eventCommand):
         
         print(f"\n🔮 [{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")
         
         # 1. Chiediamo al Connector di aprirci una chat configurata
-        chat = await self.connector.create_agentic_chat(
+        chat = self.connector.create_agentic_chat(
             system_instruction=self.prompt, 
             tools=self.tools
         )
@@ -69,11 +74,21 @@ class PredictiveAgent:
         initial_message = f"New event received. Session ID: {eventCommand.session_id}, Command: {eventCommand.cmd}, Full Data: {eventCommand.dict()}"
         response = await chat.send_message(initial_message)
 
-        # 3. IL LOOP DELL'AGENTE (continua finché l'AI non dà il testo finale)
-        while response.function_calls:
+        if not response.function_calls:
+            print(f"⚠️ [DEBUG AGENTE] L'LLM ha ignorato i tool e ha risposto subito in testo!")
+            print(f"Testo dell'LLM: {response.text}")
+
+        MAX_ITERATIONS = 7  # protezione loop infiniti
+        REQUIRED_TOOLS = {"log_session_event", "get_session_history", "retrieve"}
+        called_tools = set()
+        iteration = 0
+
+        while response.function_calls and iteration < MAX_ITERATIONS:
             tool_responses = []
-            
+            iteration += 1
+
             for function_call in response.function_calls:
+                called_tools.add(function_call.name)
                 func_name = function_call.name
                 args = function_call.args
                 
@@ -96,7 +111,13 @@ class PredictiveAgent:
             
             # Rimanda i risultati all'LLM e aspetta la prossima mossa
             response = await chat.send_message(tool_responses)
-            
+
+        # Verifica post-loop
+        missing = REQUIRED_TOOLS - called_tools
+        if missing:
+            print(f"⚠️ Tool obbligatori non chiamati: {missing}. Predizione inaffidabile.")
+            return []  # o gestisci il fallback che preferisci
+
         # 4. Estrazione Predizione Finale
         raw_response = response.text
         candidates = []
@@ -108,9 +129,9 @@ class PredictiveAgent:
         return candidates[:self.k]
 
     async def _execute_mcp_call(self, tool_name: str, args: dict):
-        """Esegue la chiamata usando il vero protocollo MCP (non una semplice POST REST)"""
+        """Esegue la chiamata usando il vero protocollo MCP tramite SSE"""
         # Di default, il trasporto HTTP di FastMCP espone l'API sulla rotta /mcp
-        endpoint = f"{self.mcp_url}/mcp" 
+        endpoint = f"{self.mcp_url}/sse" 
         
         # Gestiamo la connessione MCP in modo nativo
         async with Client(endpoint) as client:
