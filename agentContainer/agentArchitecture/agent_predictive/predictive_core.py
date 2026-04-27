@@ -36,9 +36,9 @@ REQUIRED_TOOLS = {"log_session_event", "get_session_history", "retrieve"}
 
 class PredictiveAgent:
 
-    def __init__(self, mcp_url="http://agent-backend:8000", context_history=5, k=5, model_name="models/gemini-2.0-flash-lite-001", provider="cloud"):
+    def __init__(self, mcp_url="http://agent-backend:8000", context_history=5, k=5, model_name="google/gemini-2.0-flash-lite-001", provider="cloud"):
         self.id = "AGENT PREDICTIVE"
-        self.connector = AgentConnector(provider=provider, model_name=model_name)
+        self.connector = AgentConnector(agent_name=self.id, provider=provider, model_name=model_name)
         self.k = k
         self.context_history = context_history
         self.mcp_url = mcp_url

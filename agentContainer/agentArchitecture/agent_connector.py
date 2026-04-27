@@ -22,6 +22,21 @@ Questa è la modalità corretta per implementare agenti autonomi con tool callin
 La sessione restituita viene poi pilotata dal loop agentico in PredictiveAgent, che invia i risultati dei tool con 
 chat.send_message() fino a quando il modello non produce la risposta testuale finale.
 
+AgentConnector è progettato per lavorare in modo trasparente con SDK diversi (Google, OpenAI, OpenRouter, LM Studio locale) 
+senza che il codice chiamante (PredictiveAgent) debba conoscere o  gestire le differenze tra i provider. 
+Questo è reso possibile dai wrapper definiti in 'adapter_connector.py':
+
+- GoogleChatWrapper / OpenAIChatWrapper: ogni wrapper adatta la sessione di chat del proprio SDK all'interfaccia comune 
+send_message() → UnifiedResponse. AgentConnector.create_agentic_chat() istanzia il wrapper corretto in base
+all'sdk configurato: da quel momento in poi, PredictiveAgent interagisce
+sempre e solo con l'interfaccia unificata, senza sapere quale provider
+è attivo sotto.
+
+- UnifiedFunctionCall / UnifiedResponse: oggetti neutrali che standardizzano il formato delle risposte (testo + tool calls) 
+eliminando le differenze strutturali tra SDK. Ad esempio, OpenAI espone un call_id obbligatorio per collegare ogni tool 
+result al tool call corrispondente, mentre Google non ne ha bisogno: questa differenza è nascosta dentro i wrapper e non emerge 
+mainel loop agentico di PredictiveAgent
+
 CONFIGURAZIONE TRAMITE FILE CHIAVE:
 Il file api_key.txt deve contenere due righe nel formato:
     <api_key>
@@ -34,144 +49,65 @@ import json
 from google.genai.types import HarmCategory, HarmBlockThreshold, GenerateContentConfig, Part
 from google.genai import Client as GoogleClient
 from openai import AsyncOpenAI
+from adapter_connector import GoogleChatWrapper, OpenAIChatWrapper
 
+# File contenente chiave e sdk
 KEY_FILE = "api_key_openrouter.txt"
 
 # SDK validi accettati nel file di configurazione
 VALID_SDKS = {"google", "openai", "openrouter"}
 
-# --- CLASSI DI UNIFORMAZIONE (ADAPTER PATTERN) ---
-
-class UnifiedFunctionCall:
-    """Oggetto standardizzato per le chiamate ai tool, indipendente dal provider."""
-    def __init__(self, name, args, call_id=None):
-        self.name = name
-        self.args = args
-        # call_id è usato solo da OpenAI per collegare tool_result al tool_call.
-        # Per Google è sempre None: Part.from_function_response non richiede un id.
-        self.id = call_id
-
-class UnifiedResponse:
-    """Risposta standardizzata restituita al PredictiveAgent, indipendente dal provider."""
-    def __init__(self, text="", function_calls=None):
-        self.text = text
-        self.function_calls = function_calls or []
-
-
-# --- WRAPPERS PER LE SESSIONI DI CHAT ---
-
-class GoogleChatWrapper:
-    def __init__(self, google_chat):
-        self.chat = google_chat
-
-    async def send_message(self, message):
-        response = await self.chat.send_message(message)
-
-        text = response.text or ""
-        function_calls = []
-        if response.function_calls:
-            for fc in response.function_calls:
-                # Google non espone un call_id: passiamo None esplicitamente (vedi UnifiedFunctionCall)
-                function_calls.append(UnifiedFunctionCall(name=fc.name, args=fc.args, call_id=None))
-
-        return UnifiedResponse(text, function_calls)
-
-class OpenAIChatWrapper:
-    def __init__(self, client, model, system_instruction, tools):
-        self.client = client
-        self.model = model
-        self.tools = tools
-        self.history = [{"role": "system", "content": system_instruction}]
-
-    async def send_message(self, message):
-        # 1. Aggiunge il messaggio utente o i risultati dei tool alla cronologia
-        if isinstance(message, str):
-            self.history.append({"role": "user", "content": message})
-        elif isinstance(message, list):
-            if not message:
-                raise ValueError("Lista tool_responses vuota passata a send_message: nessun tool result da inviare.")
-            # I tool results sono già formattati da AgentConnector.format_tool_response
-            for tool_result in message:
-                self.history.append(tool_result)
-
-        # 2. Prepara la chiamata
-        kwargs = {"model": self.model, "messages": self.history, "temperature": 0.0}
-        if self.tools:
-            kwargs["tools"] = self.tools
-
-        # 3. Esegue la chiamata API
-        response = await self.client.chat.completions.create(**kwargs)
-        msg = response.choices[0].message
-
-        # 4. Aggiunge la risposta dell'assistente alla history (obbligatorio per OpenAI:
-        #    il messaggio con tool_calls deve precedere i tool results nel turno successivo)
-        self.history.append(msg)
-
-        # 5. Estrae testo e tool call in formato unificato
-        text = msg.content or ""
-        function_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                # OpenAI restituisce gli argomenti come stringa JSON: deserializziamo
-                args = json.loads(tc.function.arguments)
-                function_calls.append(UnifiedFunctionCall(name=tc.function.name, args=args, call_id=tc.id))
-
-        return UnifiedResponse(text, function_calls)
-
-
-# --- AGENT CONNECTOR ---
+# COnfigurazioni di sicurezza per chiamate LLM google
+SAFETY_CONFIG = [
+    {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
+    {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+    {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+    {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+]
 
 class AgentConnector:
 
-    def __init__(self, model_name="models/gemini-2.0-flash-lite-001", provider="cloud"):
+    def __init__(self, agent_name, model_name, provider):
         self.provider = provider
+        self.agent_name = agent_name
 
         if self.provider == "local":
-            # Modalità locale: LM Studio espone un'API compatibile OpenAI.
-            # In contesto Docker, 'localhost' punta al container stesso, non all'host:
-            # 'host.docker.internal' è l'indirizzo speciale per raggiungere la rete dell'host.
-            print("🏠 [CONNECTOR] Inizializzazione in modalità LOCALE (LM Studio)")
+            # Modalità locale con LM Studio -> espone un'API compatibile OpenAI.
+            # In contesto Docker, 'localhost' punta al container stesso, non all'host -> 'host.docker.internal' è l'indirizzo speciale per raggiungere la rete dell'host.
+            print(f"🏠 [{self.agent_name}][CONNECTOR] Inizializzazione in modalità LOCALE (LM Studio)")
             self.sdk = "openai"
             self.client = AsyncOpenAI(base_url="http://host.docker.internal:1234/v1", api_key="lm-studio")
             self.model = model_name
-            print(f"✅ [CONNECTOR] Connettore locale inizializzato (Modello: {self.model})")
+            print(f"✅ [{self.agent_name}][CONNECTOR] Connettore locale inizializzato (Modello: {self.model})")
 
-        else:
-            # Modalità cloud: legge chiave e sdk dal file di configurazione
+        else: # Modalità cloud: legge chiave e sdk dal file di configurazione
+            
+            # Lettura file api key e interfaccia da utilizzare
             api_key, self.sdk = self._load_key_logic(KEY_FILE)
 
             if self.sdk == "google":
                 self.client = GoogleClient(api_key=api_key)
                 self.model = model_name
-                print(f"✅ [CONNECTOR] Connettore inizializzato su Google SDK (Modello: {self.model})")
+                print(f"✅ [{self.agent_name}][CONNECTOR] Connettore inizializzato su Google SDK (Modello: {self.model})")
 
             elif self.sdk == "openai":
                 self.client = AsyncOpenAI(api_key=api_key, base_url="https://api.openai.com/v1")
                 self.model = model_name
-                print(f"✅ [CONNECTOR] Connettore inizializzato su OpenAI SDK (Modello: {self.model})")
+                print(f"✅ [{self.agent_name}][CONNECTOR] Connettore inizializzato su OpenAI SDK (Modello: {self.model})")
 
             elif self.sdk == "openrouter":
-                # OpenRouter accetta il formato google/gemini-* invece di models/gemini-*
                 self.client = AsyncOpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-                self.model = model_name.replace("models/", "google/") if "gemini" in model_name else model_name
-                print(f"✅ [CONNECTOR] Connettore inizializzato su OpenRouter (Modello: {self.model})")
+                self.model = model_name
+                print(f"✅ [{self.agent_name}][CONNECTOR] Connettore inizializzato su OpenRouter (Modello: {self.model})")
 
     def _load_key_logic(self, filename) -> tuple[str, str]:
         """
         Legge il file di configurazione della chiave API.
         
-        Formato atteso del file (due righe):
-            <api_key>
-            sdk=<google|openai|openrouter>
-
-        Ordine di ricerca: root del progetto → cartella dello script → variabili d'ambiente.
-        Le variabili d'ambiente attese sono LLM_API_KEY e LLM_SDK.
-        
-        Returns:
-            (api_key, sdk) come tupla di stringhe.
-        
-        Raises:
-            ValueError: se chiave o sdk non vengono trovati o sdk non è valido.
+        Ordine di ricerca: 
+            1. root del progetto
+            2. cartella dello script
+            3. variabili d'ambiente -> Le variabili d'ambiente attese sono LLM_API_KEY e LLM_SDK.
         """
         path_root = os.path.abspath(filename)
         path_agent = os.path.abspath(os.path.join(os.path.dirname(__file__), filename))
@@ -183,7 +119,7 @@ class AgentConnector:
 
                 if len(lines) < 2:
                     raise ValueError(
-                        f"❌ [CONNECTOR] Il file '{path}' deve contenere due righe:\n"
+                        f"❌ [{self.agent_name}][CONNECTOR] Il file '{path}' deve contenere due righe:\n"
                         "  Riga 1: <api_key>\n"
                         "  Riga 2: sdk=<google|openai|openrouter>"
                     )
@@ -193,7 +129,7 @@ class AgentConnector:
 
                 if not sdk_line.startswith("sdk="):
                     raise ValueError(
-                        f"❌ [CONNECTOR] Riga 2 del file '{path}' non valida: '{sdk_line}'.\n"
+                        f"❌ [{self.agent_name}][CONNECTOR] Riga 2 del file '{path}' non valida: '{sdk_line}'.\n"
                         "  Formato atteso: sdk=<google|openai|openrouter>"
                     )
 
@@ -201,10 +137,10 @@ class AgentConnector:
 
                 if sdk not in VALID_SDKS:
                     raise ValueError(
-                        f"❌ [CONNECTOR] SDK '{sdk}' non riconosciuto. Valori accettati: {VALID_SDKS}"
+                        f"❌ [{self.agent_name}][CONNECTOR] SDK '{sdk}' non riconosciuto. Valori accettati: {VALID_SDKS}"
                     )
 
-                print(f"✅ [CONNECTOR] Configurazione caricata da: {path} (sdk={sdk})")
+                print(f"✅ [{self.agent_name}][CONNECTOR] Configurazione caricata da: {path} (sdk={sdk})")
                 return api_key, sdk
 
         # Fallback: variabili d'ambiente
@@ -212,29 +148,30 @@ class AgentConnector:
         env_sdk = os.getenv("LLM_SDK", "").strip().lower()
 
         if env_key and env_sdk in VALID_SDKS:
-            print(f"✅ [CONNECTOR] Configurazione caricata da variabili d'ambiente (sdk={env_sdk})")
+            print(f"✅ [{self.agent_name}][CONNECTOR] Configurazione caricata da variabili d'ambiente (sdk={env_sdk})")
             return env_key, env_sdk
 
         raise ValueError(
-            "❌ [CONNECTOR] Impossibile caricare la configurazione API.\n"
+            f"❌ [{self.agent_name}][CONNECTOR] Impossibile caricare la configurazione API.\n"
             f"  Opzione 1: crea il file '{filename}' con chiave e sdk=<google|openai|openrouter>.\n"
             "  Opzione 2: imposta le variabili d'ambiente LLM_API_KEY e LLM_SDK."
         )
 
     async def think(self, full_prompt) -> str:
-        """Chiamata singola stateless al modello. Usa il client asincrono corretto per il provider."""
+
         try:
             if self.sdk == "google":
-                # Usiamo il client asincrono (aio) per non bloccare l'event loop
+            
+                # Usiamo il client asincrono (aio) per non bloccare l'event loop    
                 response = await self.client.aio.models.generate_content(
                     model=self.model,
                     contents=full_prompt,
-                    config={"temperature": 0.0, "top_p": 0.1, "max_output_tokens": 1024}
+                    config={"temperature": 0.0, "top_p": 0.1, "max_output_tokens": 1024, "safety_settings": SAFETY_CONFIG}
                 )
+
                 return response.text if response and response.text else ""
 
-            else:
-                # openai / openrouter / local: tutti compatibili con AsyncOpenAI
+            else: # openai / openrouter / local: tutti compatibili con AsyncOpenAI
                 response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": full_prompt}],
@@ -244,7 +181,7 @@ class AgentConnector:
                 return response.choices[0].message.content or ""
 
         except Exception as e:
-            print(f"❌ [CONNECTOR] Eccezione in think(): {e}")
+            print(f"❌ [{self.agent_name}][CONNECTOR] Eccezione in think(): {e}")
             return ""
 
     def create_agentic_chat(self, system_instruction: str, google_tools: list, openai_tools: list):
@@ -253,12 +190,12 @@ class AgentConnector:
             config = GenerateContentConfig(
                 system_instruction=system_instruction,
                 tools=google_tools,
-                temperature=0.0
+                temperature=0.0, 
+                safety_settings=SAFETY_CONFIG
             )
             chat = self.client.aio.chats.create(model=self.model, config=config)
             return GoogleChatWrapper(chat)
-        else:
-            # openai / openrouter / local: tutti usano OpenAIChatWrapper
+        else: # openai / openrouter / local: tutti usano OpenAIChatWrapper
             return OpenAIChatWrapper(self.client, self.model, system_instruction, openai_tools)
 
     def format_tool_response(self, name: str, result: str, call_id: str = None):
