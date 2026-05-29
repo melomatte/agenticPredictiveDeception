@@ -9,6 +9,7 @@ from chromadb.utils import embedding_functions
 # Configurazione percorsi (interni al container backend)
 DB_PATH = "/app/data/vector_db"
 LOG_PATH = "/app/data/sessions"
+ARTIFACTS_PATH = "/app/data/artifacts/artifacts.jsonl"
 
 # Inizializzazione MCP Server
 mcp = FastMCP("Agent-Backend")
@@ -108,6 +109,79 @@ def get_session_history(session_id: str, window_size: int) -> list:
                     
     print(f"✅ [BACKEND][LOG] Letti {len(context_history)} comandi storici.")
     return context_history
+
+import json
+
+# NOTA: Accettiamo sia dict che str per essere resilienti all'output dell'LLM
+@mcp.tool()
+def save_artifact(predicted_command: str, artifact_data: dict | str) -> bool:
+    """
+    Salva un nuovo artefatto in modalità APPEND, gestendo in modo sicuro
+    sia dizionari Python che stringhe JSON grezze.
+    """
+    print(f"\n💾 [BACKEND][ARTIFACTS] Salvataggio nuovo artefatto per: '{predicted_command}'")
+    
+    # 1. CONTROLLO DIFENSIVO: Se l'LLM ha passato una stringa, la trasformiamo in dizionario
+    if isinstance(artifact_data, str):
+        try:
+            artifact_data = json.loads(artifact_data)
+        except json.JSONDecodeError as e:
+            print(f"❌ [BACKEND][ARTIFACTS] L'agente ha fornito un JSON non valido: {e}")
+            return False
+
+    os.makedirs(os.path.dirname(ARTIFACTS_PATH), exist_ok=True)
+    
+    # 2. Creazione del record pulito con JSON annidato
+    record = {
+        "command": predicted_command,
+        "artifact": artifact_data
+    }
+    
+    try:
+        with open(ARTIFACTS_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record) + '\n')
+        print("✅ [BACKEND][ARTIFACTS] Artefatto appeso con successo.")
+        return True
+    except Exception as e:
+        print(f"❌ [BACKEND][ARTIFACTS] Errore durante il salvataggio: {e}")
+        return False
+
+@mcp.tool()
+def get_artifact(predicted_command: str) -> str:
+    """
+    Cerca nel file JSONL se esiste un artefatto per il comando predetto.
+    Restituisce il JSON dell'artefatto come stringa se trovato, altrimenti stringa vuota.
+    """
+    print(f"\n📁 [BACKEND][ARTIFACTS] Ricerca artefatto per il comando: '{predicted_command}'")
+    
+    if not os.path.exists(ARTIFACTS_PATH):
+        print("⚠️ [BACKEND][ARTIFACTS] File artifacts.jsonl non esiste ancora.")
+        return ""
+
+    latest_match = None
+
+    try:
+        # Leggiamo il file JSONL riga per riga
+        with open(ARTIFACTS_PATH, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    data = json.loads(line)
+                    # Aggiorniamo latest_match ogni volta che troviamo il comando.
+                    # Così alla fine del ciclo avremo sempre l'artefatto più recente!
+                    if data.get("command") == predicted_command:
+                        latest_match = data.get("artifact")
+                        
+    except json.JSONDecodeError:
+        print("❌ [BACKEND][ARTIFACTS] Trovata una riga corrotta durante la lettura.")
+
+    # Il momento della verità: la restituzione!
+    if latest_match:
+        print(f"✅ [BACKEND][ARTIFACTS] Artefatto trovato per '{predicted_command}'.")
+        # Restituiamo ESATTAMENTE l'oggetto "artifact" (il JSON del Forger)
+        return json.dumps(latest_match)
+    
+    print("📭 [BACKEND][ARTIFACTS] Nessun artefatto pre-esistente trovato.")
+    return ""
 
 if __name__ == "__main__":
     print("🌐 [BACKEND] MCP Server in ascolto. Pronto a servire gli agents sulla porta 8000...")

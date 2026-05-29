@@ -3,32 +3,36 @@ version: '3.8'
 services:
   honeypot:
     build: 
-      context: ./honeypot
+      context: ./honeypotContainer
     ports:
       - "2222:2222"
     environment:
-      # Punta all'Orchestratore
-      - ORCHESTRATOR_URL=http://ai-orchestrator:8000/new_command
+      - ORCHESTRATOR_URL=http://agentic-system:8000/new_command
     networks:
       - honeypot_net
     restart: unless-stopped
     depends_on:
-      - ai-orchestrator
+      - agentic-system
 
-  ai-orchestrator:
+  agentic-system:
     build:
       context: ./agentContainer
     networks:
       - honeypot_net
       - backend_net
     environment:
-      - BACKEND_MCP_URL=http://agent-backend:8000
+      - BACKEND_MCP_URL=http://backend:8000/sse
+      - PROVIDER=cloud
+      - MODEL_NAME=deepseek/deepseek-v4-flash
+      - NUM_PREDICTION=5
+    secret:
+      - llm_config_secret
     depends_on:
       - agent-backend
     restart: unless-stopped
 
-  agent-backend:
-    build: ./agentBackend
+  backend:
+    build: ./backendContainer
     volumes:
       - type: bind
         source: /media/matteo/T9/Cybersecurity/chroma_storage_ctx5
@@ -40,6 +44,11 @@ services:
         target: /app/data/sessions
         bind:
           create_host_path: false
+      - type: bind
+        source: /media/matteo/T9/Cybersecurity/artifacts/artifacts.json
+        target: /app/data/artifacts/artifacts.json
+        bind:
+          create_host_path: false
     networks:
       - backend_net
 
@@ -48,3 +57,7 @@ networks:
     driver: bridge
   backend_net:
     driver: bridge
+
+secrets:
+  llm_config_secret:
+    file: ./.env

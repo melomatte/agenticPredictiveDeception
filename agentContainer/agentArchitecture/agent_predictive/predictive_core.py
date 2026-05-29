@@ -36,7 +36,7 @@ REQUIRED_TOOLS = {"log_session_event", "get_session_history", "retrieve"}
 
 class PredictiveAgent:
 
-    def __init__(self, mcp_url="http://agent-backend:8000", context_history=5, k=5, model_name="google/gemini-2.0-flash-lite-001", provider="cloud"):
+    def __init__(self, mcp_url, model_name, provider, k, context_history=5):
         self.id = "AGENT PREDICTIVE"
         self.connector = AgentConnector(agent_name=self.id, provider=provider, model_name=model_name)
         self.k = k
@@ -57,7 +57,7 @@ class PredictiveAgent:
 
     async def __aenter__(self):
         """Apre la connessione SSE una sola volta. Chiamato automaticamente da 'async with'."""
-        endpoint = f"{self.mcp_url}/sse"
+        endpoint = f"{self.mcp_url}"
         print(f"🔌 [{self.id}] Apertura connessione SSE persistente verso {endpoint}...")
         self._mcp_client = Client(endpoint)
         await self._mcp_client.__aenter__()
@@ -177,7 +177,6 @@ class PredictiveAgent:
         if not self._mcp_client:
             raise RuntimeError(
                 f"[{self.id}] Client MCP non inizializzato. "
-                "Usa 'async with PredictiveAgent(...) as agent' prima di chiamare decide()."
             )
 
         print(f"\n🔮 [{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")

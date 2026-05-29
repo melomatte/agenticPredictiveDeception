@@ -52,7 +52,7 @@ from openai import AsyncOpenAI
 from adapter_connector import GoogleChatWrapper, OpenAIChatWrapper
 
 # File contenente chiave e sdk
-KEY_FILE = "api_key_openrouter.txt"
+SECRET_FILE = "/run/secrets/llm_config_secret"
 
 # SDK validi accettati nel file di configurazione
 VALID_SDKS = {"google", "openai", "openrouter"}
@@ -83,7 +83,7 @@ class AgentConnector:
         else: # Modalità cloud: legge chiave e sdk dal file di configurazione
             
             # Lettura file api key e interfaccia da utilizzare
-            api_key, self.sdk = self._load_key_logic(KEY_FILE)
+            api_key, self.sdk = self._load_key_logic()
 
             if self.sdk == "google":
                 self.client = GoogleClient(api_key=api_key)
@@ -100,63 +100,53 @@ class AgentConnector:
                 self.model = model_name
                 print(f"✅ [{self.agent_name}][CONNECTOR] Connettore inizializzato su OpenRouter (Modello: {self.model})")
 
-    def _load_key_logic(self, filename) -> tuple[str, str]:
+    def _load_key_logic(self) -> tuple[str, str]:
         """
-        Legge il file di configurazione della chiave API.
-        
-        Ordine di ricerca: 
-            1. root del progetto
-            2. cartella dello script
-            3. variabili d'ambiente -> Le variabili d'ambiente attese sono LLM_API_KEY e LLM_SDK.
+        Legge il file di configurazione della chiave API in stile .env -> secret del container
         """
-        path_root = os.path.abspath(filename)
-        path_agent = os.path.abspath(os.path.join(os.path.dirname(__file__), filename))
 
-        for path in [path_root, path_agent]:
-            if os.path.exists(path):
-                with open(path, "r") as f:
-                    lines = [l.strip() for l in f.readlines() if l.strip()]
+        if os.path.exists(SECRET_FILE):
+            config = {}
+            with open(SECRET_FILE, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    # Ignora le righe vuote e i commenti
+                    if not line or line.startswith("#"):
+                        continue
+                    
+                    # Estrae in modo sicuro Chiave e Valore
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        config[key.strip()] = value.strip()
 
-                if len(lines) < 2:
-                    raise ValueError(
-                        f"❌ [{self.agent_name}][CONNECTOR] Il file '{path}' deve contenere due righe:\n"
-                        "  Riga 1: <api_key>\n"
-                        "  Riga 2: sdk=<google|openai|openrouter>"
-                    )
+            api_key = config.get("LLM_API_KEY")
+            sdk = config.get("LLM_SDK", "").lower()
 
-                api_key = lines[0]
-                sdk_line = lines[1]
+            # Validazione presenza chiavi
+            if not api_key or not sdk:
+                raise ValueError(
+                    f"❌ [{self.agent_name}][CONNECTOR] Formato non valido nel file '{SECRET_FILE}'.\n"
+                    "  Assicurati che il file contenga esattamente:\n"
+                    "  LLM_API_KEY=<la_tua_chiave>\n"
+                    "  LLM_SDK=<google|openai|openrouter>" \
+                    "  MODEL_NAME=<modello>" \
+                    "  PROVIDER=<cloud|local>"
+                )
 
-                if not sdk_line.startswith("sdk="):
-                    raise ValueError(
-                        f"❌ [{self.agent_name}][CONNECTOR] Riga 2 del file '{path}' non valida: '{sdk_line}'.\n"
-                        "  Formato atteso: sdk=<google|openai|openrouter>"
-                    )
+            # Validazione SDK
+            if sdk not in VALID_SDKS:
+                raise ValueError(
+                    f"❌ [{self.agent_name}][CONNECTOR] SDK '{sdk}' non riconosciuto. Valori accettati: {VALID_SDKS}"
+                )
 
-                sdk = sdk_line.split("=", 1)[1].strip().lower()
-
-                if sdk not in VALID_SDKS:
-                    raise ValueError(
-                        f"❌ [{self.agent_name}][CONNECTOR] SDK '{sdk}' non riconosciuto. Valori accettati: {VALID_SDKS}"
-                    )
-
-                print(f"✅ [{self.agent_name}][CONNECTOR] Configurazione caricata da: {path} (sdk={sdk})")
-                return api_key, sdk
-
-        # Fallback: variabili d'ambiente
-        env_key = os.getenv("LLM_API_KEY")
-        env_sdk = os.getenv("LLM_SDK", "").strip().lower()
-
-        if env_key and env_sdk in VALID_SDKS:
-            print(f"✅ [{self.agent_name}][CONNECTOR] Configurazione caricata da variabili d'ambiente (sdk={env_sdk})")
-            return env_key, env_sdk
-
-        raise ValueError(
-            f"❌ [{self.agent_name}][CONNECTOR] Impossibile caricare la configurazione API.\n"
-            f"  Opzione 1: crea il file '{filename}' con chiave e sdk=<google|openai|openrouter>.\n"
-            "  Opzione 2: imposta le variabili d'ambiente LLM_API_KEY e LLM_SDK."
-        )
-
+            print(f"✅ [{self.agent_name}][CONNECTOR] Configurazione caricata da: {SECRET_FILE} (sdk={sdk})")
+            return api_key, sdk
+        else:
+            raise ValueError(
+                    f"❌ [{self.agent_name}][CONNECTOR] Il file '{SECRET_FILE}' non esiste! Controlla il caricamento del segreto\n"
+            )
+    
+    '''
     async def think(self, full_prompt) -> str:
 
         try:
@@ -183,6 +173,7 @@ class AgentConnector:
         except Exception as e:
             print(f"❌ [{self.agent_name}][CONNECTOR] Eccezione in think(): {e}")
             return ""
+    '''
 
     def create_agentic_chat(self, system_instruction: str, google_tools: list, openai_tools: list):
         """Restituisce la sessione di chat wrappata nel formato unificato per il provider corrente."""

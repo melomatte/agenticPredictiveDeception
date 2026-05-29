@@ -23,14 +23,19 @@ FLUSSO DI DISPATCH:
 """
 
 from contextlib import asynccontextmanager
+import os
+import asyncio
+from typing import List
 from fastapi import FastAPI
 from pydantic import BaseModel
-from dotenv import load_dotenv
 from agent_predictive import PredictiveAgent
 from agent_forger import ForgerAgent
 
 # Carichiamo le variabili dal file .env (o dall'ambiente Docker)
-load_dotenv()
+PROVIDER = os.getenv("PROVIDER")
+MODEL_NAME = os.getenv("MODEL_NAME")
+BACKEND_MCP_URL = os.getenv("BACKEND_MCP_URL")
+NUM_PREDICTION = os.getenv("NUM_PREDICTION")
 
 # Struttura evento ricevuta da fakeshell
 class CommandEvent(BaseModel):
@@ -41,40 +46,49 @@ class CommandEvent(BaseModel):
     cwd: str
     cmd: str
 
-class Orchestrator:
+class HoneypotListener:
     def __init__(self):
-        self.predictive = PredictiveAgent()
-        self.forger = ForgerAgent()
+        self.predictive = PredictiveAgent(mcp_url=BACKEND_MCP_URL, model_name=MODEL_NAME, provider=PROVIDER, k=NUM_PREDICTION)
+        self.forgers: List[ForgerAgent] = [ForgerAgent(model_name=MODEL_NAME, provider=PROVIDER, id= i) for i in range(NUM_PREDICTION)]
 
     async def __aenter__(self):
-        print("[ORCHESTRATOR] 🔌 Apertura connessioni agenti...")
+        print("[HONEYPOT LISTENER] 🔌 Apertura connessioni agenti...")
         await self.predictive.__aenter__()
         # Se anche ForgerAgent diventerà un async context manager, aggiungilo qui:
         # await self.forger.__aenter__()
-        print("[ORCHESTRATOR] ✅ Connessioni agenti aperte.")
+        print("[HONEYPOT LISTENER] ✅ Connessioni agenti aperte.")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        print("[ORCHESTRATOR] 🔌 Chiusura connessioni agenti...")
+        print("[HONEYPOT LISTENER] 🔌 Chiusura connessioni agenti...")
         await self.predictive.__aexit__(exc_type, exc_val, exc_tb)
         # await self.forger.__aexit__(exc_type, exc_val, exc_tb)
-        print("[ORCHESTRATOR] ✅ Connessioni agenti chiuse.")
+        print("[HONEYPOT LISTENER] ✅ Connessioni agenti chiuse.")
 
     async def dispatch(self, event: CommandEvent):
-        print(f"\n[ORCHESTRATOR] 📥 Nuovo comando intercettato: '{event.cmd}'")
+        print(f"\n[HONEYPOT LISTENER] 📥 Nuovo comando intercettato: '{event.cmd}'")
 
         # --- FASE 1: PREDIZIONE + RAG ---
-        print(f"[ORCHESTRATOR] 🔍 Fase 1: Analisi e Predizione in corso...")
+        print(f"[HONEYPOT LISTENER] Fase 1: Analisi e Predizione in corso...")
         predicted_cmd = await self.predictive.decide(event)
-        print(f"[ORCHESTRATOR] 🔍 Fase 1 terminata")
+        print(f"[HONEYPOT LISTENER] Comandi predetti: {predicted_cmd}")
+        print(f"[HONEYPOT LISTENER] Fase 1 terminata")
 
-        # --- FASE 2: FALSARIO (PROATTIVITÀ) ---
-        if predicted_cmd:
-            print(f"[ORCHESTRATOR] 🔮 Fase 2: Predizione ricevuta! '{predicted_cmd}'")
-            await self.forger.decide(event)
-        else:
-            print("[ORCHESTRATOR] ➖ Nessuna predizione rilevante. Salto fase Falsario.")
-        print(f"[ORCHESTRATOR] 🔮 Fase 2 terminata")
+        if not predicted_cmd:
+            print("[HONEYPOT LISTENER] Nessuna predizione ricevuta. Salto la fase di creazione artefatti")
+            return
+            
+        # --- FASE 2: FORGER ---
+        num_active_forgers = min(len(predicted_cmd), len(self.forgers))
+        print(f"\n[HONEYPOT LISTENER] Fase 2: avvio lavoro di {num_active_forgers} agent forger in parallelo...")
+        tasks = [
+            forger.decide(cmd, event)
+            for cmd, forger in zip(predicted_cmd, self.forgers)
+        ]
+
+        result = await asyncio.gather(*tasks, return_exceptions=True)
+        print(f"[HONEYPOT LISTENER] Artefatti generati: {result}")
+        print("[HONEYPOT LISTENER] Fase 2: fase 2 terminata per tutte le predizioni.")
 
 
 # --- Lifespan: gestisce startup e shutdown dell'intera applicazione ---
@@ -83,8 +97,8 @@ class Orchestrator:
 async def lifespan(app: FastAPI):
 
     # Uscendo dal 'async with', __aexit__ chiude automaticamente tutte le connessioni
-    async with Orchestrator() as orch:
-        print("[ORCHESTRATOR] 🚀 Server pronto a ricevere eventi.")
+    async with HoneypotListener() as orch:
+        print("[HONEYPOT LISTENER] 🚀 Server pronto a ricevere eventi.")
         app.state.orch = orch   
         yield                   
 
