@@ -25,7 +25,7 @@ services:
       - PROVIDER=cloud
       - MODEL_NAME=deepseek/deepseek-v4-flash
       - NUM_PREDICTION=5
-    secret:
+    secrets:
       - llm_config_secret
     depends_on:
       - agent-backend
