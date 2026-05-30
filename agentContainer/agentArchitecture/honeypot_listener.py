@@ -35,6 +35,7 @@ from agent_forger import ForgerAgent
 PROVIDER = os.getenv("PROVIDER")
 MODEL_NAME = os.getenv("MODEL_NAME")
 BACKEND_MCP_URL = os.getenv("BACKEND_MCP_URL")
+FORGERY_MCP_URL = os.getenv("FORGERY_MCP_URL")
 NUM_PREDICTION = os.getenv("NUM_PREDICTION")
 
 # Struttura evento ricevuta da fakeshell
@@ -49,24 +50,25 @@ class CommandEvent(BaseModel):
 class HoneypotListener:
     def __init__(self):
         self.predictive = PredictiveAgent(mcp_url=BACKEND_MCP_URL, model_name=MODEL_NAME, provider=PROVIDER, k=NUM_PREDICTION)
-        self.forgers: List[ForgerAgent] = [ForgerAgent(model_name=MODEL_NAME, provider=PROVIDER, id= i) for i in range(NUM_PREDICTION)]
+        self.forgers: List[ForgerAgent] = [ForgerAgent(mcp_url_backend=BACKEND_MCP_URL, mcp_url_forgery=FORGERY_MCP_URL,model_name=MODEL_NAME, provider=PROVIDER, id= i) for i in range(int(NUM_PREDICTION))]
 
     async def __aenter__(self):
-        print("[HONEYPOT LISTENER] 🔌 Apertura connessioni agenti...")
+        print("[HONEYPOT LISTENER] Apertura connessioni agenti...")
         await self.predictive.__aenter__()
-        # Se anche ForgerAgent diventerà un async context manager, aggiungilo qui:
-        # await self.forger.__aenter__()
-        print("[HONEYPOT LISTENER] ✅ Connessioni agenti aperte.")
+        for forger in self.forgers:
+            await forger.__aenter__()
+        print("[HONEYPOT LISTENER] Connessioni agenti aperte.")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        print("[HONEYPOT LISTENER] 🔌 Chiusura connessioni agenti...")
+        print("[HONEYPOT LISTENER] Chiusura connessioni agenti...")
         await self.predictive.__aexit__(exc_type, exc_val, exc_tb)
-        # await self.forger.__aexit__(exc_type, exc_val, exc_tb)
-        print("[HONEYPOT LISTENER] ✅ Connessioni agenti chiuse.")
+        for forger in self.forgers:
+            await forger.__aexit__(exc_type, exc_val, exc_tb)
+        print("[HONEYPOT LISTENER] Connessioni agenti chiuse.")
 
     async def dispatch(self, event: CommandEvent):
-        print(f"\n[HONEYPOT LISTENER] 📥 Nuovo comando intercettato: '{event.cmd}'")
+        print(f"\n[HONEYPOT LISTENER] Nuovo comando intercettato: '{event.cmd}'")
 
         # --- FASE 1: PREDIZIONE + RAG ---
         print(f"[HONEYPOT LISTENER] Fase 1: Analisi e Predizione in corso...")

@@ -39,7 +39,7 @@ class PredictiveAgent:
     def __init__(self, mcp_url, model_name, provider, k, context_history=5):
         self.id = "AGENT PREDICTIVE"
         self.connector = AgentConnector(agent_name=self.id, provider=provider, model_name=model_name)
-        self.k = k
+        self.k = int(k)
         self.context_history = context_history
         self.mcp_url = mcp_url
         self.prompt = PROMPT_MCP.format(k=self.k, N=self.context_history)

@@ -28,4 +28,4 @@ EXPOSE 8000
 WORKDIR /app/agentArchitecture
 
 # 6. Avviamo Uvicorn. Ora troverà 'orchestrator.py' nella directory corrente!
-CMD ["uvicorn", "orchestrator:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "honeypot_listener:app", "--host", "0.0.0.0", "--port", "8000"]

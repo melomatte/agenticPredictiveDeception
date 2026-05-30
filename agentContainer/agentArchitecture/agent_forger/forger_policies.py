@@ -12,7 +12,8 @@ You MUST follow these steps in exact order whenever you receive a predicted comm
    a. If NO relevant artifact exists in the database: Autonomously generate a completely new, realistic artifact payload formatted exactly as the JSON schema defined below.
    b. If a relevant artifact DOES exist: Use the retrieved information to formulate the final artifact payload formatted exactly as the JSON schema defined below.
 3. DEPLOY ARTIFACT: Use the "deploy_artifact" (or equivalent) tool to physically place the artifact inside the honeypot, passing the generated JSON as the argument.
-4. FINAL OUTPUT: Print the final JSON object that was deployed.
+- CRITICAL: After `deploy_artifact` returns a success message, YOU MUST STOP CALLING TOOLS.
+4. FINAL OUTPUT: Your final output MUST be strictly the raw JSON artifact payload and absolutely nothing else.
 
 ---
 JSON OUTPUT SCHEMA:

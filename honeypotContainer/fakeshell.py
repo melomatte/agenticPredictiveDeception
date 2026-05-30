@@ -17,7 +17,7 @@ import requests
 # L'URL del futuro Orchestratore AI (Agent_Team)
 # Quando testeremo tutto con docker-compose, 'ai-orchestrator' sarà il nome del servizio.
 # Per ora, usiamo una variabile d'ambiente per poterlo testare localmente.
-ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "http://ai-orchestrator:8000/new_command")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://agentic-system:8000/new_command")
 
 # Informazioni utente simulate
 user = getpass.getuser()
@@ -33,8 +33,8 @@ else:
 # Logging Locale (Opzionale/Backup)
 LOG_FILE = "/tmp/fakeshell_local.json"
 
-session_start_time = time.strftime("%Y%m%d_%H%M%S")
-SESSION_ID = f"{session_start_time}_{attacker_ip.replace('.','-')}"
+session_date = time.strftime("%Y-%m-%d")
+SESSION_ID = f"{session_date}_{attacker_ip.replace('.','-')}"
 
 def trigger_ai(cmd, cwd):
     """
@@ -61,8 +61,9 @@ def trigger_ai(cmd, cwd):
     # Chiamata bloccante all'Orchestratore (Max 2.5 secondi)
     try:
         requests.post(ORCHESTRATOR_URL, json=entry, timeout=2.5)
-    except Exception:
+    except Exception as e:
         # L'Orchestratore non risponde, passiamo all'esecuzione reale
+        print(f"\n[DEBUG] Errore di connessione all'AI: {e}\n")
         pass
 
 # Ambiente realistico

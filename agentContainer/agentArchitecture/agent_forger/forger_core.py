@@ -25,7 +25,7 @@ ne garantiscono la correttezza:
 """
 
 from agent_connector import AgentConnector
-from agent_predictive.predictive_policies import PROMPT_MCP
+from agent_forger.forger_policies import PROMPT_MCP
 from google.genai import types
 from fastmcp import Client
 import json
@@ -34,10 +34,9 @@ import json
 MAX_ITERATIONS = 7
 REQUIRED_TOOLS = {"get_artifact"}
 BACKEND_TOOLS = {"save_artifact", "get_artifact"}
-FORGERY_TOOLS = {}
+FORGERY_TOOLS = {"deploy_artifact"}
 
-
-class PredictiveAgent:
+class ForgerAgent:
 
     def __init__(self, id, mcp_url_backend, mcp_url_forgery,  model_name, provider):
         self.id = f"AGENT FORGER-{id}"
@@ -60,26 +59,26 @@ class PredictiveAgent:
 
     async def __aenter__(self):
         """Apre la connessione SSE una sola volta. Chiamato automaticamente da 'async with'."""
-        print(f"🔌 [{self.id}] Apertura connessione SSE persistente verso backend:  {self.mcp_url_backend}...")
+        print(f"[{self.id}] Apertura connessione SSE persistente verso backend:  {self.mcp_url_backend}...")
         self._mcp_client_backend = Client(self.mcp_url_backend)
         await self._mcp_client_backend.__aenter__()
-        print(f"✅ [{self.id}] Connessione SSE verso backend aperta con successo.")
+        print(f"[{self.id}] Connessione SSE verso backend aperta con successo.")
 
-        print(f"🔌 [{self.id}] Apertura connessione SSE persistente verso forgery (MCP per creazione artefatti da inettare nell'honeypot):  {self.mcp_url_backend}...")
-        self._mcp_client_backend = Client(self.mcp_url_forgery)
+        print(f"[{self.id}] Apertura connessione SSE persistente verso forgery (MCP per creazione artefatti da inettare nell'honeypot):  {self.mcp_url_forgery}...")
+        self._mcp_client_forgery = Client(self.mcp_url_forgery)
         await self._mcp_client_forgery.__aenter__()
-        print(f"✅ [{self.id}] Connessione SSE verso forgery aperta con successo.")
+        print(f"[{self.id}] Connessione SSE verso forgery aperta con successo.")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Chiude la connessione SSE. Chiamato automaticamente da 'async with' anche in caso di eccezione."""
         if self._mcp_client_backend:
-            print(f"🔌 [{self.id}] Chiusura connessione SSE persistente verso backend...")
+            print(f"[{self.id}] Chiusura connessione SSE persistente verso backend...")
             await self._mcp_client_backend.__aexit__(exc_type, exc_val, exc_tb)
             self._mcp_client_backend = None
         
         if self._mcp_client_forgery:
-            print(f"🔌 [{self.id}] Chiusura connessione SSE persistente verso forgery...")
+            print(f"[{self.id}] Chiusura connessione SSE persistente verso forgery...")
             await self._mcp_client_forgery.__aexit__(exc_type, exc_val, exc_tb)
             self._mcp_client_forgery = None
 
@@ -127,8 +126,27 @@ class PredictiveAgent:
                 required=["predicted_command", "artifact_data"]
             )
         )
+
+        deploy_artifact_tool = types.FunctionDeclaration(
+            name="deploy_artifact",
+            description="Deploys the generated fake artifact physically into the honeypot file system at the specified path.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "intended_path": types.Schema(
+                        type=types.Type.STRING, 
+                        description="The realistic Linux path where the artifact should be created (e.g., /var/www/html/config.php)."
+                    ),
+                    "content": types.Schema(
+                        type=types.Type.STRING, 
+                        description="The raw textual content of the fake file."
+                    )
+                },
+                required=["intended_path", "content"]
+            )
+        )
     
-        google_tools = [types.Tool(function_declarations=[get_artifact_tool, save_artifact_tool])]
+        google_tools = [types.Tool(function_declarations=[get_artifact_tool, save_artifact_tool, deploy_artifact_tool])]
 
         # 2. FORMATO OPENAI / OPENROUTER / LOCAL (JSON Schema standard)
         openai_tools = [
@@ -169,7 +187,29 @@ class PredictiveAgent:
                         "required": ["predicted_command", "artifact_data"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "deploy_artifact",
+                    "description": "Deploys the generated fake artifact physically into the honeypot file system at the specified path.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "intended_path": {
+                                "type": "string",
+                                "description": "The realistic Linux path where the artifact should be created (e.g., /var/www/html/config.php)."
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "The raw textual content of the fake file."
+                            }
+                        },
+                        "required": ["intended_path", "content"]
+                    }
+                }
             }
+
         ]
 
         return google_tools, openai_tools
@@ -188,7 +228,7 @@ class PredictiveAgent:
                 f"[{self.id}] Client MCP forgery non inizializzato. "
             )
 
-        print(f"\n🔮 [{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")
+        print(f"\n[{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")
 
         # 1. Apriamo la chat configurata: il Connector sceglie il wrapper corretto in base all'sdk
         chat = self.connector.create_agentic_chat(
@@ -197,8 +237,7 @@ class PredictiveAgent:
             openai_tools=self.openai_tools
         )
 
-        # 2. Messaggio iniziale: i dati dell'attaccante sono isolati in <untrusted_data>
-        #    per prevenire prompt injection (il modello riceve istruzioni di trattarli come dati grezzi)
+        # 2. Messaggio iniziale di avvio della chat
         initial_message = (
             "New event received.\n"
             f"Session ID: {eventCommand.session_id}\n"
@@ -209,8 +248,8 @@ class PredictiveAgent:
 
         # Controllo immediato: se l'LLM risponde in testo senza invocare tool, il workflow è fallito
         if not response.function_calls:
-            print(f"⚠️ [{self.id}] L'LLM ha ignorato i tool e ha risposto subito in testo!")
-            print(f"⚠️ [{self.id}] Testo dell'LLM: {response.text}")
+            print(f"[{self.id}] L'LLM ha ignorato i tool e ha risposto subito in testo!")
+            print(f"[{self.id}] Testo dell'LLM: {response.text}")
             return []
 
         # 3. Loop agentico
@@ -238,7 +277,7 @@ class PredictiveAgent:
                 args = function_call.args
                 call_id = function_call.id  # None per Google, stringa per OpenAI
 
-                print(f"🤖 [{self.id}] Tool Calling (iter {iteration}): chiama '{func_name}'")
+                print(f"[{self.id}] Tool Calling (iter {iteration}): chiama '{func_name}'")
                 called_tools.add(func_name)
                 
                 if func_name in BACKEND_TOOLS:
@@ -249,7 +288,7 @@ class PredictiveAgent:
                 try:
                     tool_result = await self._execute_mcp_call(func_name, args, endpoint)
                 except Exception as e:
-                    print(f"❌ [{self.id}] Errore MCP Tool '{func_name}': {e}")
+                    print(f"[{self.id}] Errore MCP Tool '{func_name}': {e}")
                     tool_result = {"error": str(e)}
 
                 # Il Connector formatta la risposta nel formato corretto per il provider attivo
@@ -260,12 +299,12 @@ class PredictiveAgent:
 
         # Verifica anti-loop
         if iteration >= MAX_ITERATIONS:
-            print(f"⚠️ [{self.id}] Raggiunto il limite massimo di iterazioni ({MAX_ITERATIONS}). Loop interrotto.")
+            print(f"[{self.id}] Raggiunto il limite massimo di iterazioni ({MAX_ITERATIONS}). Loop interrotto.")
 
         # Verifica anti-hallucination: tutti i tool obbligatori devono essere stati chiamati
         missing_tools = REQUIRED_TOOLS - called_tools
         if missing_tools:
-            print(f"⚠️ [{self.id}] Tool obbligatori non chiamati: {missing_tools}. Predizione inaffidabile, annullo.")
+            print(f"[{self.id}] Tool obbligatori non chiamati: {missing_tools}. Predizione inaffidabile, annullo.")
             return []
 
         # 4. Estrazione artefatto finale
@@ -280,7 +319,7 @@ class PredictiveAgent:
             parsed = json.loads(raw_response)
             return parsed
         except Exception:
-            print(f"⚠️ [{self.id}] JSON non valido:\n{raw_response}")
+            print(f"[{self.id}] JSON non valido:\n{raw_response}")
             return []
 
     async def _execute_mcp_call(self, tool_name: str, args: dict, endpoint: str):
