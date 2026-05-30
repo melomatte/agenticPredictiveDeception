@@ -21,8 +21,8 @@ services:
     environment:
       - BACKEND_MCP_URL=http://backend:8000/sse
       - FORGERY_MCP_URL=http://mcp-forgery:8000/sse
-      - PROVIDER=cloud
-      - MODEL_NAME=deepseek/deepseek-v4-flash
+      - PROVIDER=cloud                                                    # Modifica provider
+      - MODEL_NAME=deepseek/deepseek-v4-flash                             # Modifica modello
       - NUM_PREDICTION=5
     secrets:
       - llm_config_secret

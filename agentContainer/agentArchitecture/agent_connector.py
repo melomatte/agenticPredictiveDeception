@@ -145,35 +145,6 @@ class AgentConnector:
             raise ValueError(
                     f"❌ [{self.agent_name}][CONNECTOR] Il file '{SECRET_FILE}' non esiste! Controlla il caricamento del segreto\n"
             )
-    
-    '''
-    async def think(self, full_prompt) -> str:
-
-        try:
-            if self.sdk == "google":
-            
-                # Usiamo il client asincrono (aio) per non bloccare l'event loop    
-                response = await self.client.aio.models.generate_content(
-                    model=self.model,
-                    contents=full_prompt,
-                    config={"temperature": 0.0, "top_p": 0.1, "max_output_tokens": 1024, "safety_settings": SAFETY_CONFIG}
-                )
-
-                return response.text if response and response.text else ""
-
-            else: # openai / openrouter / local: tutti compatibili con AsyncOpenAI
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": full_prompt}],
-                    temperature=0.0,
-                    max_tokens=1024
-                )
-                return response.choices[0].message.content or ""
-
-        except Exception as e:
-            print(f"❌ [{self.agent_name}][CONNECTOR] Eccezione in think(): {e}")
-            return ""
-    '''
 
     def create_agentic_chat(self, system_instruction: str, google_tools: list, openai_tools: list):
         """Restituisce la sessione di chat wrappata nel formato unificato per il provider corrente."""
