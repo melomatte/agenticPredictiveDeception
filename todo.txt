@@ -1,3 +1,3 @@
 - nascondere nel codice di fakeshell.py i punti che smascherano l'honeypot (invio evento a orchestrator, presenza fakeshell come bash ecc.)
-- realizzare agent forger (e funzioni MCP che chiama all'interno del mcp_server.py)
+- Migliorare comportamento forger agent
 - realizzare agent attaccante
