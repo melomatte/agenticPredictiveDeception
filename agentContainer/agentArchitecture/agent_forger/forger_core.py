@@ -31,7 +31,7 @@ from fastmcp import Client
 import json
 
 # Parametri per evitare looping e hallucination
-MAX_ITERATIONS = 7
+MAX_ITERATIONS = 6
 REQUIRED_TOOLS = {"get_artifact"}
 BACKEND_TOOLS = {"save_artifact", "get_artifact"}
 FORGERY_TOOLS = {"deploy_artifact"}
@@ -286,7 +286,9 @@ class ForgerAgent:
                     endpoint = "forgery"
 
                 try:
+                    print(f"[{self.id}] Attendendo esecuzione MCP Server per '{func_name}'...")
                     tool_result = await self._execute_mcp_call(func_name, args, endpoint)
+                    print(f"[{self.id}] Tool '{func_name}' eseguito! Risposta MCP ricevuta.")
                 except Exception as e:
                     print(f"[{self.id}] Errore MCP Tool '{func_name}': {e}")
                     tool_result = {"error": str(e)}
@@ -295,7 +297,9 @@ class ForgerAgent:
                 formatted_response = self.connector.format_tool_response(func_name, tool_result, call_id)
                 tool_responses.append(formatted_response)
 
+            print(f"[{self.id}] Inviando risultati dei tool all'LLM...")
             response = await chat.send_message(tool_responses)
+            print(f"[{self.id}] Risposta LLM ricevuta!")
 
         # Verifica anti-loop
         if iteration >= MAX_ITERATIONS:

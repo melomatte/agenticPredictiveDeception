@@ -12,7 +12,7 @@ print("[MCP FORGERY] Avvio del MCP server forgery...")
 # Inizializza il client Docker (leggerà automaticamente dal docker.sock)
 docker_client = docker.from_env()
 
-HONEYPOT_CONTAINER_NAME = "agenticpredictivedeception-honeypot"
+HONEYPOT_CONTAINER_NAME = "agenticpredictivedeception-honeypot-1"
 
 @mcp.tool()
 def deploy_artifact(intended_path: str, content: str) -> str:

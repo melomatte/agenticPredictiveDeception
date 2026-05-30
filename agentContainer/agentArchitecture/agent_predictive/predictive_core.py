@@ -30,7 +30,7 @@ from google.genai import types
 from fastmcp import Client
 
 # Parametri per evitare looping e hallucination
-MAX_ITERATIONS = 7
+MAX_ITERATIONS = 4
 REQUIRED_TOOLS = {"log_session_event", "get_session_history", "retrieve"}
 
 
@@ -58,16 +58,16 @@ class PredictiveAgent:
     async def __aenter__(self):
         """Apre la connessione SSE una sola volta. Chiamato automaticamente da 'async with'."""
         endpoint = f"{self.mcp_url}"
-        print(f"🔌 [{self.id}] Apertura connessione SSE persistente verso {endpoint}...")
+        print(f"[{self.id}] Apertura connessione SSE persistente verso {endpoint}...")
         self._mcp_client = Client(endpoint)
         await self._mcp_client.__aenter__()
-        print(f"✅ [{self.id}] Connessione SSE aperta con successo.")
+        print(f"[{self.id}] Connessione SSE aperta con successo.")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Chiude la connessione SSE. Chiamato automaticamente da 'async with' anche in caso di eccezione."""
         if self._mcp_client:
-            print(f"🔌 [{self.id}] Chiusura connessione SSE persistente...")
+            print(f"[{self.id}] Chiusura connessione SSE persistente...")
             await self._mcp_client.__aexit__(exc_type, exc_val, exc_tb)
             self._mcp_client = None
 
@@ -179,7 +179,7 @@ class PredictiveAgent:
                 f"[{self.id}] Client MCP non inizializzato. "
             )
 
-        print(f"\n🔮 [{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")
+        print(f"\n[{self.id}] Inizio ciclo autonomo per sessione {eventCommand.session_id}...")
 
         # 1. Apriamo la chat configurata: il Connector sceglie il wrapper corretto in base all'sdk
         chat = self.connector.create_agentic_chat(
@@ -232,7 +232,7 @@ class PredictiveAgent:
                 args = function_call.args
                 call_id = function_call.id  # None per Google, stringa per OpenAI
 
-                print(f"🤖 [{self.id}] Tool Calling (iter {iteration}): chiama '{func_name}'")
+                print(f"[{self.id}] Tool Calling (iter {iteration}): chiama '{func_name}'")
                 called_tools.add(func_name)
 
                 try:
@@ -263,8 +263,8 @@ class PredictiveAgent:
             print(f"⚠️ [{self.id}] Risposta finale vuota.")
             return []
 
-        print(f"✅ [{self.id}] Predizione generata:\n{raw_response}")
         candidates = [line.strip() for line in raw_response.splitlines() if line.strip()]
+        print(f"[{self.id}] Predizione generata:\n{candidates[:self.k]}")
         return candidates[:self.k]
 
     async def _execute_mcp_call(self, tool_name: str, args: dict):

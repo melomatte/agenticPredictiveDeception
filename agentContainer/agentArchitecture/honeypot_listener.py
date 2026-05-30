@@ -87,11 +87,30 @@ class HoneypotListener:
             forger.decide(cmd, event)
             for cmd, forger in zip(predicted_cmd, self.forgers)
         ]
+        asyncio_tasks = [asyncio.create_task(t) for t in tasks]
 
-        result = await asyncio.gather(*tasks, return_exceptions=True)
+        # Attendiamo massimo 180 secondi (3 minuti)
+        done, pending = await asyncio.wait(asyncio_tasks, timeout=180.0)
+
+        result = []
+
+        # 1. Recuperiamo i risultati di chi ha finito in tempo
+        for task in done:
+            try:
+                # task.result() restituisce l'output, o lancia l'eccezione se l'agente è andato in crash
+                res = task.result()
+                result.append(res)
+            except Exception as e:
+                print(f"[HONEYPOT LISTENER] ⚠️ Errore interno in uno degli agenti: {e}")
+                result.append([]) 
+
+        # 2. Gestiamo i "ritardatari" (Quelli bloccati dopo 3 minuti)
+        if pending:
+            print(f"\n[HONEYPOT LISTENER] ⚠️ TIMEOUT: {len(pending)} agenti non hanno finito entro 3 minuti.")
+            for task in pending:
+                task.cancel()
         print(f"[HONEYPOT LISTENER] Artefatti generati: {result}")
         print("[HONEYPOT LISTENER] Fase 2: fase 2 terminata per tutte le predizioni.")
-
 
 # --- Lifespan: gestisce startup e shutdown dell'intera applicazione ---
 

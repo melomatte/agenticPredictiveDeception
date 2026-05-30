@@ -13,6 +13,7 @@ import getpass
 import readline
 import glob
 import requests
+from requests.exceptions import ReadTimeout
 
 # L'URL del futuro Orchestratore AI (Agent_Team)
 # Quando testeremo tutto con docker-compose, 'ai-orchestrator' sarà il nome del servizio.
@@ -60,10 +61,11 @@ def trigger_ai(cmd, cwd):
 
     # Chiamata bloccante all'Orchestratore (Max 2.5 secondi)
     try:
-        requests.post(ORCHESTRATOR_URL, json=entry, timeout=2.5)
+        requests.post(ORCHESTRATOR_URL, json=entry, timeout=0.1)
+    except ReadTimeout:
+        pass
     except Exception as e:
-        # L'Orchestratore non risponde, passiamo all'esecuzione reale
-        print(f"\n[DEBUG] Errore di connessione all'AI: {e}\n")
+        print(f"\n[DEBUG] Errore imprevisto di rete: {e}\n")
         pass
 
 # Ambiente realistico
