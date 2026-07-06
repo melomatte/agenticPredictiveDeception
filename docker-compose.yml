@@ -35,17 +35,17 @@ services:
     build: ./backendContainer
     volumes:
       - type: bind
-        source: /media/matteo/T9/Cybersecurity/chroma_storage_ctx5        # Modifica percorso -> percorso rag db
+        source: ${CHROMA_STORAGE_PATH}
         target: /app/data/vector_db
         bind:
           create_host_path: false
       - type: bind
-        source: /media/matteo/T9/Cybersecurity/sessions                   # Modifica percorso -> percorso cartella file di sessione
+        source: ${SESSIONS_PATH}
         target: /app/data/sessions
         bind:
           create_host_path: false
       - type: bind
-        source: /media/matteo/T9/Cybersecurity/artifacts                  # Modifica percorso -> percorso file .jsonl artefatti
+        source: ${ARTIFACTS_PATH}
         target: /app/data/artifacts
         bind:
           create_host_path: false
